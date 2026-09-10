@@ -1,6 +1,6 @@
 [package]
 name = "mlc-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "An unofficial CLI for The MLC Public Search API"
 repository = "https://github.com/oneortwo/mlc-cli"
@@ -19,7 +19,7 @@ serde_json = "1"
 dirs = "6"
 toml = "0.8"
 comfy-table = "7"
+tempfile = "3"
 
 [dev-dependencies]
 assert_cmd = "2"
-tempfile = "3"

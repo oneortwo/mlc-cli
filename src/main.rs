@@ -32,7 +32,7 @@ fn run(cli: Cli) -> Result<()> {
         } => {
             config::setup(username_ref, password_ref)?;
             output::print(
-                &json!({"configured":true,"source":"1password","secrets_saved":false}),
+                &json!({"configured":true,"source":"config file","secrets_saved":true}),
                 cli.json,
             )
         }

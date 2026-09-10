@@ -70,22 +70,26 @@ fn incomplete_environment_does_not_silently_fall_back() {
 
 #[cfg(unix)]
 #[test]
-fn setup_stores_only_references_and_status_does_not_invoke_op() {
+fn setup_saves_private_local_credentials_without_op() {
+    use std::os::unix::fs::PermissionsExt;
     let home = tempfile::tempdir().unwrap();
-    mlc()
+    let output = mlc()
         .env("HOME", home.path())
-        .args([
-            "auth",
-            "setup",
-            "--username-ref",
-            "op://example/mlc/username",
-            "--password-ref",
-            "op://example/mlc/password",
-        ])
-        .assert()
-        .success();
-    let config = std::fs::read_to_string(home.path().join(".mlc/config.toml")).unwrap();
-    assert!(config.contains("op://example/mlc/username"));
+        .env("PATH", "")
+        .env("MLC_USERNAME", "fake-user")
+        .env("MLC_PASSWORD", "fake-password")
+        .args(["auth", "setup"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("fake-password"));
+    let path = home.path().join(".mlc/config.toml");
+    let config = std::fs::read_to_string(&path).unwrap();
+    assert!(config.contains("fake-password"));
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
     let output = mlc()
         .env("HOME", home.path())
         .env("PATH", "")
@@ -95,6 +99,40 @@ fn setup_stores_only_references_and_status_does_not_invoke_op() {
     assert!(output.status.success());
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()["source"],
-        "1password"
+        "config file"
     );
+    mlc()
+        .env("HOME", home.path())
+        .env("PATH", "")
+        .args(["auth", "setup"])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn legacy_references_are_imported_once_and_removed() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir(home.path().join(".mlc")).unwrap();
+    let path = home.path().join(".mlc/config.toml");
+    std::fs::write(&path, "username_ref = 'op://example/item/username'\npassword_ref = 'op://example/item/password'\n").unwrap();
+    let executable = home.path().join("op");
+    std::fs::write(&executable, "#!/bin/sh\nprintf fake-value\n").unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    mlc()
+        .env("HOME", home.path())
+        .env("PATH", home.path())
+        .args(["auth", "setup"])
+        .assert()
+        .success();
+    let data = std::fs::read_to_string(path).unwrap();
+    assert!(!data.contains("op://"));
+    assert!(!data.contains("_ref"));
+    mlc()
+        .env("HOME", home.path())
+        .env("PATH", "")
+        .args(["auth", "setup"])
+        .assert()
+        .success();
 }

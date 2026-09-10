@@ -1,12 +1,18 @@
 use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
-use std::{env, fs, path::PathBuf, process::Command};
+use std::{env, fs, io::Write, path::PathBuf, process::Command};
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
-    pub username_ref: String,
-    pub password_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password_ref: Option<String>,
 }
 
 pub struct Credentials {
@@ -35,22 +41,50 @@ fn valid_reference(reference: &str) -> bool {
         && !reference.chars().any(char::is_control)
 }
 
-pub fn setup(username_ref: String, password_ref: String) -> Result<()> {
-    if !valid_reference(&username_ref) || !valid_reference(&password_ref) {
-        return Err(Error::new(
-            2,
-            "Use op://vault/item/field references, not secret values",
-        ));
-    }
+pub fn setup(username_ref: Option<String>, password_ref: Option<String>) -> Result<()> {
+    let credentials = match (username_ref, password_ref) {
+        (Some(username), Some(password)) => {
+            if !valid_reference(&username) || !valid_reference(&password) {
+                return Err(Error::new(
+                    2,
+                    "Use op://vault/item/field references, not secret values",
+                ));
+            }
+            Credentials {
+                username: resolve(&username)?,
+                password: resolve(&password)?,
+            }
+        }
+        (None, None) => credentials()?,
+        _ => return Err(Error::new(2, "Provide both 1Password references")),
+    };
+    save_credentials(credentials)
+}
+
+fn save_credentials(credentials: Credentials) -> Result<()> {
     let config = Config {
-        username_ref,
-        password_ref,
+        username: Some(credentials.username),
+        password: Some(credentials.password),
+        ..Config::default()
     };
     let data = toml::to_string(&config).map_err(|_| Error::new(1, "Cannot serialize config"))?;
     let path = path()?;
-    fs::create_dir_all(path.parent().unwrap())
-        .map_err(|_| Error::new(1, "Cannot create ~/.mlc"))?;
-    fs::write(path, data).map_err(|_| Error::new(1, "Cannot save configuration"))
+    let directory = path.parent().unwrap();
+    fs::create_dir_all(directory).map_err(|_| Error::new(1, "Cannot create ~/.mlc"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o700))
+            .map_err(|_| Error::new(1, "Cannot secure ~/.mlc"))?;
+    }
+    // NamedTempFile is owner-only on Unix; replacement is atomic.
+    let mut file = tempfile::NamedTempFile::new_in(directory)
+        .map_err(|_| Error::new(1, "Cannot create local config"))?;
+    file.write_all(data.as_bytes())
+        .map_err(|_| Error::new(1, "Cannot write local config"))?;
+    file.persist(path)
+        .map_err(|_| Error::new(1, "Cannot save local config"))?;
+    Ok(())
 }
 
 pub fn source() -> Result<&'static str> {
@@ -68,10 +102,23 @@ pub fn source() -> Result<&'static str> {
         return Ok("environment");
     }
     let config = read_config()?;
-    if !valid_reference(&config.username_ref) || !valid_reference(&config.password_ref) {
+    if config.username.is_some() || config.password.is_some() {
+        if config.username.as_ref().is_none_or(|v| v.trim().is_empty())
+            || config.password.as_ref().is_none_or(|v| v.trim().is_empty())
+        {
+            return Err(Error::new(
+                2,
+                "Local config needs both nonempty username and password",
+            ));
+        }
+        return Ok("config file");
+    }
+    if !config.username_ref.as_deref().is_some_and(valid_reference)
+        || !config.password_ref.as_deref().is_some_and(valid_reference)
+    {
         return Err(Error::new(
             2,
-            "Configuration must contain 1Password references only",
+            "Configure local credentials with mlc auth setup",
         ));
     }
     Ok("1password")
@@ -85,9 +132,12 @@ pub fn credentials() -> Result<Credentials> {
         });
     }
     let config = read_config()?;
+    if let (Some(username), Some(password)) = (config.username, config.password) {
+        return Ok(Credentials { username, password });
+    }
     Ok(Credentials {
-        username: resolve(&config.username_ref)?,
-        password: resolve(&config.password_ref)?,
+        username: resolve(config.username_ref.as_deref().unwrap_or_default())?,
+        password: resolve(config.password_ref.as_deref().unwrap_or_default())?,
     })
 }
 

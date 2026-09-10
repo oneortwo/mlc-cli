@@ -17,19 +17,17 @@ mlc --help
 
 Request Public Search API access through [The MLC](https://www.themlc.com/bulk-database-feed). The API uses a username/password exchange for tokens; bulk-feed credentials are separate. The data endpoints require the returned JWT `idToken` as the bearer token (verified against the live API); the returned `accessToken` is rejected.
 
-Recommended: install the [1Password CLI](https://developer.1password.com/docs/cli/) and save references to your credentials:
+Credentials are stored locally in `~/.mlc/config.toml`, outside the repository, like `sc`. The file is readable only by your user on macOS/Linux.
+
+With `MLC_USERNAME` and `MLC_PASSWORD` set in your environment, save them once:
 
 ```sh
-mlc auth setup \
-  --username-ref 'op://YOUR_VAULT/YOUR_ITEM/username' \
-  --password-ref 'op://YOUR_VAULT/YOUR_ITEM/password'
+mlc auth setup
 mlc auth status
 mlc doctor
 ```
 
-Only references are saved in `~/.mlc/config.toml`. `op read` resolves the values at runtime. `auth status` checks configuration without accessing 1Password or authenticating; `doctor` checks live authentication and data access with a small read-only work search, without printing tokens.
-
-Alternatively, inject `MLC_USERNAME` and `MLC_PASSWORD` into the process environment through your secret manager. Both must be set and nonempty. Environment credentials take precedence over 1Password references. There are deliberately no password flags or plaintext credential files.
+Subsequent commands read the saved credentials automatically. Environment variables override the saved values when both are set. `auth status` shows only the credential source; `doctor` verifies login and data access without printing credentials or tokens.
 
 ## Usage
 
@@ -75,7 +73,7 @@ The batch request intentionally uses `mlcsongCode`, matching the API specificati
 
 ## Security
 
-Credentials and tokens are held in memory only. Requests use HTTPS to the fixed MLC API host and never follow redirects. HTTP error bodies and 1Password stderr are not printed. Known credential/token values are redacted if echoed in successful data responses. Do not put credentials, local config, or real API-response fixtures in Git. See [SECURITY.md](SECURITY.md).
+Credentials are stored in your local configuration; tokens are held in memory only. Requests use HTTPS to the fixed MLC API host and never follow redirects. HTTP error bodies are not printed. Known credential/token values are redacted if echoed in successful data responses. Do not put credentials, local config, or real API-response fixtures in Git. See [SECURITY.md](SECURITY.md).
 
 ## Development
 

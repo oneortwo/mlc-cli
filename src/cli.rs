@@ -26,7 +26,7 @@ pub enum Command {
         #[command(subcommand)]
         command: Work,
     },
-    /// Configure credential references or check authentication
+    /// Save local credentials or check authentication
     Auth {
         #[command(subcommand)]
         command: Auth,
@@ -83,12 +83,12 @@ pub enum Work {
 
 #[derive(Subcommand)]
 pub enum Auth {
-    /// Save only 1Password references, never credential values
+    /// Save credentials locally from environment or existing config; optionally import 1Password once
     Setup {
-        #[arg(long)]
-        username_ref: String,
-        #[arg(long)]
-        password_ref: String,
+        #[arg(long, requires = "password_ref")]
+        username_ref: Option<String>,
+        #[arg(long, requires = "username_ref")]
+        password_ref: Option<String>,
     },
     /// Show credential source without resolving or displaying secrets
     Status,
