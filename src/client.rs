@@ -21,7 +21,13 @@ pub struct Client {
 
 impl Client {
     pub fn login(credentials: Credentials) -> Result<Self> {
-        Self::login_at(BASE_URL, credentials)
+        // MLC_API_URL exists for tests and proxies; the default is the public MLC host.
+        let base = std::env::var("MLC_API_URL")
+            .ok()
+            .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
+            .map(|url| format!("{}/", url.trim_end_matches('/')))
+            .unwrap_or_else(|| BASE_URL.to_string());
+        Self::login_at(&base, credentials)
     }
 
     fn login_at(base: &str, credentials: Credentials) -> Result<Self> {
@@ -44,7 +50,10 @@ impl Client {
             .and_then(Value::as_str)
             .filter(|token| !token.is_empty())
             .ok_or_else(|| Error::new(2, "MLC did not return an ID token; check credentials"))?;
-        let mut secrets = vec![credentials.username, credentials.password, token.into()];
+        // Only tokens are scrubbed from responses. Usernames and passwords are never
+        // echoed by the API, and scrubbing them would corrupt titles that happen to
+        // contain the same text.
+        let mut secrets = vec![token.to_string()];
         for key in ["refreshToken", "accessToken"] {
             if let Some(value) = body.get(key).and_then(Value::as_str) {
                 secrets.push(value.into());
@@ -186,6 +195,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(client.token, "fake-id-token");
+        assert_eq!(client.secrets, vec!["fake-id-token", "fake-access-token"]);
         let request = handle.join().unwrap();
         assert!(request.starts_with("POST /oauth/token "));
         let body: Value = serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
@@ -243,19 +253,18 @@ mod tests {
     }
 
     #[test]
-    fn request_uses_bearer_and_redacts_echoed_credentials() {
-        let (address, handle) =
-            server("200 OK", r#"[{"title":"fake-password","fake-token":"ok"}]"#);
+    fn request_uses_bearer_and_redacts_echoed_tokens_but_not_titles() {
+        let (address, handle) = server("200 OK", r#"[{"title":"Love","fake-token":"fake-token"}]"#);
         let client = Client {
             http: HttpClient::new(),
             base: address,
             token: "fake-token".into(),
-            secrets: vec!["fake-password".into(), "fake-token".into()],
+            secrets: vec!["fake-token".into()],
         };
         let result = client
             .request(Method::POST, "works", Some(json!([{"mlcsongCode":"123"}])))
             .unwrap();
-        assert_eq!(result, json!([{"title":"[REDACTED]","[REDACTED]":"ok"}]));
+        assert_eq!(result, json!([{"title":"Love","[REDACTED]":"[REDACTED]"}]));
         let request = handle.join().unwrap();
         assert!(request
             .to_lowercase()

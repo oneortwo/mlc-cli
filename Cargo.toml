@@ -1,10 +1,13 @@
 [package]
 name = "mlc-cli"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "An unofficial CLI for The MLC Public Search API"
 repository = "https://github.com/oneortwo/mlc-cli"
 license = "MIT"
+readme = "README.md"
+keywords = ["mlc", "music", "publishing", "royalties", "cli"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "mlc"
@@ -19,6 +22,7 @@ serde_json = "1"
 dirs = "6"
 toml = "0.8"
 comfy-table = "7"
+dialoguer = { version = "0.11", default-features = false, features = ["password"] }
 tempfile = "3"
 
 [dev-dependencies]

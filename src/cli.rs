@@ -26,7 +26,7 @@ pub enum Command {
         #[command(subcommand)]
         command: Work,
     },
-    /// Save local credentials or check authentication
+    /// Save credentials locally or check authentication
     Auth {
         #[command(subcommand)]
         command: Auth,
@@ -83,14 +83,17 @@ pub enum Work {
 
 #[derive(Subcommand)]
 pub enum Auth {
-    /// Save credentials locally from environment or existing config; optionally import 1Password once
+    /// Prompt for your MLC username and password, verify them, and save them locally
+    ///
+    /// Credentials are written to ~/.mlc/config.toml with owner-only permissions.
+    /// With --no-input (or when stdin is not a terminal) the values are read from
+    /// MLC_USERNAME and MLC_PASSWORD instead of prompting.
     Setup {
-        #[arg(long, requires = "password_ref")]
-        username_ref: Option<String>,
-        #[arg(long, requires = "username_ref")]
-        password_ref: Option<String>,
+        /// Read MLC_USERNAME and MLC_PASSWORD instead of prompting
+        #[arg(long)]
+        no_input: bool,
     },
-    /// Show credential source without resolving or displaying secrets
+    /// Show where credentials come from without displaying them
     Status,
 }
 

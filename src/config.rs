@@ -1,71 +1,84 @@
 use crate::error::{Error, Result};
+use dialoguer::{Input, Password};
 use serde::{Deserialize, Serialize};
-use std::{env, fs, io::Write, path::PathBuf, process::Command};
+use std::{env, fs, io::Write, path::PathBuf};
 
+// Unknown keys are ignored so a config written by an older release still parses.
 #[derive(Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Config {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub username_ref: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub password_ref: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct Credentials {
     pub username: String,
     pub password: String,
 }
 
-fn path() -> Result<PathBuf> {
+pub fn path() -> Result<PathBuf> {
     dirs::home_dir()
         .map(|home| home.join(".mlc/config.toml"))
         .ok_or_else(|| Error::new(1, "Cannot locate home directory"))
 }
 
 fn read_config() -> Result<Config> {
-    let data =
-        fs::read_to_string(path()?).map_err(|_| {
-            Error::new(2,
-        "Set MLC_USERNAME and MLC_PASSWORD, or run mlc auth setup with 1Password references")
-        })?;
+    let data = fs::read_to_string(path()?).map_err(|_| {
+        Error::new(
+            2,
+            "No credentials configured; run `mlc auth setup` or set MLC_USERNAME and MLC_PASSWORD",
+        )
+    })?;
     toml::from_str(&data).map_err(|_| Error::new(2, "Invalid ~/.mlc/config.toml"))
 }
 
-fn valid_reference(reference: &str) -> bool {
-    reference.starts_with("op://")
-        && reference.split('/').count() >= 5
-        && !reference.chars().any(char::is_control)
+fn complete(username: Option<&str>, password: Option<&str>) -> bool {
+    username.is_some_and(|value| !value.trim().is_empty())
+        && password.is_some_and(|value| !value.trim().is_empty())
 }
 
-pub fn setup(username_ref: Option<String>, password_ref: Option<String>) -> Result<()> {
-    let credentials = match (username_ref, password_ref) {
-        (Some(username), Some(password)) => {
-            if !valid_reference(&username) || !valid_reference(&password) {
-                return Err(Error::new(
-                    2,
-                    "Use op://vault/item/field references, not secret values",
-                ));
-            }
-            Credentials {
-                username: resolve(&username)?,
-                password: resolve(&password)?,
-            }
-        }
-        (None, None) => credentials()?,
-        _ => return Err(Error::new(2, "Provide both 1Password references")),
-    };
-    save_credentials(credentials)
+// Both variables set: Some. Neither set: None. Anything else is a misconfiguration.
+pub fn from_environment() -> Result<Option<Credentials>> {
+    let username = env::var("MLC_USERNAME").ok();
+    let password = env::var("MLC_PASSWORD").ok();
+    if username.is_none() && password.is_none() {
+        return Ok(None);
+    }
+    if !complete(username.as_deref(), password.as_deref()) {
+        return Err(Error::new(
+            2,
+            "Set both nonempty MLC_USERNAME and MLC_PASSWORD",
+        ));
+    }
+    Ok(Some(Credentials {
+        username: username.unwrap_or_default(),
+        password: password.unwrap_or_default(),
+    }))
 }
 
-fn save_credentials(credentials: Credentials) -> Result<()> {
+pub fn prompt() -> Result<Credentials> {
+    eprintln!("MLC Public Search API setup");
+    let username: String = Input::new()
+        .with_prompt("Username")
+        .interact_text()
+        .map_err(|_| Error::new(2, "Cannot read username"))?;
+    let password = Password::new()
+        .with_prompt("Password")
+        .interact()
+        .map_err(|_| Error::new(2, "Cannot read password"))?;
+    if !complete(Some(&username), Some(&password)) {
+        return Err(Error::new(2, "Username and password must not be empty"));
+    }
+    Ok(Credentials { username, password })
+}
+
+pub fn save(credentials: &Credentials) -> Result<PathBuf> {
     let config = Config {
-        username: Some(credentials.username),
-        password: Some(credentials.password),
-        ..Config::default()
+        username: Some(credentials.username.clone()),
+        password: Some(credentials.password.clone()),
     };
     let data = toml::to_string(&config).map_err(|_| Error::new(1, "Cannot serialize config"))?;
     let path = path()?;
@@ -82,80 +95,37 @@ fn save_credentials(credentials: Credentials) -> Result<()> {
         .map_err(|_| Error::new(1, "Cannot create local config"))?;
     file.write_all(data.as_bytes())
         .map_err(|_| Error::new(1, "Cannot write local config"))?;
-    file.persist(path)
+    file.persist(&path)
         .map_err(|_| Error::new(1, "Cannot save local config"))?;
-    Ok(())
+    Ok(path)
 }
 
 pub fn source() -> Result<&'static str> {
-    let username = env::var("MLC_USERNAME").ok();
-    let password = env::var("MLC_PASSWORD").ok();
-    if username.is_some() || password.is_some() {
-        if username.as_ref().is_none_or(|v| v.trim().is_empty())
-            || password.as_ref().is_none_or(|v| v.trim().is_empty())
-        {
-            return Err(Error::new(
-                2,
-                "Set both nonempty MLC_USERNAME and MLC_PASSWORD",
-            ));
-        }
+    if from_environment()?.is_some() {
         return Ok("environment");
     }
     let config = read_config()?;
-    if config.username.is_some() || config.password.is_some() {
-        if config.username.as_ref().is_none_or(|v| v.trim().is_empty())
-            || config.password.as_ref().is_none_or(|v| v.trim().is_empty())
-        {
-            return Err(Error::new(
-                2,
-                "Local config needs both nonempty username and password",
-            ));
-        }
+    if complete(config.username.as_deref(), config.password.as_deref()) {
         return Ok("config file");
     }
-    if !config.username_ref.as_deref().is_some_and(valid_reference)
-        || !config.password_ref.as_deref().is_some_and(valid_reference)
-    {
-        return Err(Error::new(
-            2,
-            "Configure local credentials with mlc auth setup",
-        ));
-    }
-    Ok("1password")
+    Err(Error::new(
+        2,
+        "No credentials configured; run `mlc auth setup` or set MLC_USERNAME and MLC_PASSWORD",
+    ))
 }
 
 pub fn credentials() -> Result<Credentials> {
-    if source()? == "environment" {
-        return Ok(Credentials {
-            username: env::var("MLC_USERNAME").unwrap_or_default(),
-            password: env::var("MLC_PASSWORD").unwrap_or_default(),
-        });
+    if let Some(credentials) = from_environment()? {
+        return Ok(credentials);
     }
     let config = read_config()?;
-    if let (Some(username), Some(password)) = (config.username, config.password) {
-        return Ok(Credentials { username, password });
-    }
-    Ok(Credentials {
-        username: resolve(config.username_ref.as_deref().unwrap_or_default())?,
-        password: resolve(config.password_ref.as_deref().unwrap_or_default())?,
-    })
-}
-
-fn resolve(reference: &str) -> Result<String> {
-    let output = Command::new("op")
-        .args(["read", "--no-newline", reference])
-        .output()
-        .map_err(|_| Error::new(2, "Cannot start 1Password CLI; install op and sign in"))?;
-    if !output.status.success() {
-        return Err(Error::new(
+    match (config.username, config.password) {
+        (Some(username), Some(password)) if complete(Some(&username), Some(&password)) => {
+            Ok(Credentials { username, password })
+        }
+        _ => Err(Error::new(
             2,
-            "1Password read failed; unlock 1Password and check the reference",
-        ));
+            "No credentials configured; run `mlc auth setup` or set MLC_USERNAME and MLC_PASSWORD",
+        )),
     }
-    let value = String::from_utf8(output.stdout)
-        .map_err(|_| Error::new(2, "1Password returned invalid text"))?;
-    if value.trim().is_empty() {
-        return Err(Error::new(2, "1Password credential is empty"));
-    }
-    Ok(value)
 }
