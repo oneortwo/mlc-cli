@@ -9,6 +9,7 @@ use cli::{Auth, Cli, Command, Search, Work};
 use error::Result;
 use reqwest::Method;
 use serde_json::{json, Value};
+use std::io::IsTerminal;
 
 fn main() {
     if let Err(error) = run(Cli::parse()) {
@@ -24,15 +25,24 @@ fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Command::Auth {
-            command:
-                Auth::Setup {
-                    username_ref,
-                    password_ref,
-                },
+            command: Auth::Setup { no_input },
         } => {
-            config::setup(username_ref, password_ref)?;
+            let credentials = match config::from_environment()? {
+                Some(credentials) => credentials,
+                None if no_input || !std::io::stdin().is_terminal() => {
+                    return Err(error::Error::new(
+                        2,
+                        "Set MLC_USERNAME and MLC_PASSWORD, or run `mlc auth setup` in a terminal",
+                    ))
+                }
+                None => config::prompt()?,
+            };
+            eprintln!("Verifying credentials...");
+            client::Client::login(credentials.clone())?;
+            let path = config::save(&credentials)?;
+            eprintln!("Credentials saved to {}", path.display());
             output::print(
-                &json!({"configured":true,"source":"config file","secrets_saved":true}),
+                &json!({"configured":true,"verified":true,"path":path}),
                 cli.json,
             )
         }

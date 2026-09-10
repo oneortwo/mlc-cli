@@ -1,33 +1,55 @@
 # mlc-cli
 
-An unofficial command-line client for [The MLC Public Search API](https://public-api.themlc.com/api/doc), inspired by [soundcharts-cli](https://github.com/oneortwo/soundcharts-cli). Written in Rust. Binary: `mlc`.
+An unofficial command-line client for [The MLC Public Search API](https://public-api.themlc.com/api/doc). Written in Rust. Binary: `mlc`.
 
 Search musical works and recordings, look up songwriters and publishers, and retrieve works in batches. All four data endpoints in the published API v1.2.0 are supported.
 
+> **Disclaimer:** This project is not affiliated with, endorsed by, or officially connected to The MLC (Mechanical Licensing Collective). You need your own MLC Public Search API credentials to use it, and use of the API and its data remains subject to [MLC terms](https://themlc.com/musical-works-database-terms-use).
+
+## Built for agents (and humans)
+
+- **Auto-JSON when piped.** Tables on a terminal, clean JSON the moment you pipe into `jq` or a file. `--json` forces it.
+- **Stable exit codes.** `0` ok, `1` request or input error, `2` auth or usage, `3` not found, `4` rate limited. Agents can branch without scraping stderr.
+- **stdout is data, stderr is diagnostics.** `mlc ... > out.json` never mixes logs into the payload.
+- **No surprises with credentials.** Tokens live in memory only, error bodies are never printed, and `mlc doctor` tells you exactly what is wrong.
+- **Tab completion** for bash, zsh, and fish.
+
 ## Install
 
-Download a macOS or Linux binary from [Releases](https://github.com/oneortwo/mlc-cli/releases), or install from source with stable Rust:
+macOS and Linux, no Rust toolchain required:
+
+```sh
+curl -sSL https://raw.githubusercontent.com/oneortwo/mlc-cli/main/install.sh | sh
+```
+
+The script downloads the latest release for your platform into `~/.local/bin`, verifies its SHA-256 checksum, and installs shell completions. Set `MLC_INSTALL_DIR` to install somewhere else.
+
+Alternatives: download an archive from [Releases](https://github.com/oneortwo/mlc-cli/releases) (macOS Apple Silicon and Intel, Linux x86-64 and arm64), or build from source with stable Rust:
 
 ```sh
 cargo install --git https://github.com/oneortwo/mlc-cli --locked
-mlc --help
+```
+
+## Quickstart
+
+```sh
+mlc auth setup      # prompts for username and password, verifies them, saves them
+mlc doctor          # confirms login and data access
+mlc search works 'Yesterday' --writer-last-name McCartney
 ```
 
 ## Authentication
 
-Request Public Search API access through [The MLC](https://www.themlc.com/bulk-database-feed). The API uses a username/password exchange for tokens; bulk-feed credentials are separate. The data endpoints require the returned JWT `idToken` as the bearer token (verified against the live API); the returned `accessToken` is rejected.
+Request Public Search API access through [The MLC](https://www.themlc.com/bulk-database-feed). The API exchanges a username and password for tokens; bulk-feed credentials are separate.
 
-Credentials are stored locally in `~/.mlc/config.toml`, outside the repository, like `sc`. The file is readable only by your user on macOS/Linux.
-
-With `MLC_USERNAME` and `MLC_PASSWORD` set in your environment, save them once:
+`mlc auth setup` saves your credentials to `~/.mlc/config.toml`, readable only by your user. It verifies them against the API first, so a typo never gets saved. For scripts, CI, and agents, set `MLC_USERNAME` and `MLC_PASSWORD` instead; they take precedence over the file, and `mlc auth setup --no-input` saves them without prompting.
 
 ```sh
-mlc auth setup
-mlc auth status
-mlc doctor
+mlc auth status     # shows whether credentials come from the environment or the file
+mlc doctor          # logs in and runs one small read-only search
 ```
 
-Subsequent commands read the saved credentials automatically. Environment variables override the saved values when both are set. `auth status` shows only the credential source; `doctor` verifies login and data access without printing credentials or tokens.
+Neither command prints credentials or tokens. Each command obtains fresh tokens, which are never written to disk. The data endpoints require the returned JWT `idToken` as the bearer token (verified against the live API); the returned `accessToken` is rejected.
 
 ## Usage
 
@@ -45,16 +67,16 @@ mlc completions zsh > _mlc
 
 Replace placeholders with actual titles and identifiers. Search criteria are combined in one API request. Work searches require a title and at least one writer field; the live API rejects title-only and writer-only requests, although its schema does not mark those requirements. Work searches support one writer filter per invocation. Use the API's exact identifiers, including leading zeros.
 
-Collections display as tables in a terminal; piped output and `--json` use JSON. Single-work details use formatted JSON to preserve nested writer/publisher ownership chains. Diagnostics go to stderr. Unknown response fields are preserved.
+Collections display as tables in a terminal; piped output and `--json` use JSON. Single-work details use formatted JSON to preserve nested writer/publisher ownership chains. Unknown response fields are preserved.
 
-MLC's published API exposes no pagination or total-count parameters. The CLI returns the API response as received; a search is not a guaranteed complete catalog export. Requests time out after 60 seconds. Rate limits are reported without automatic retries. Each command obtains fresh tokens, which are never cached to disk.
+MLC's published API exposes no pagination or total-count parameters. The CLI returns the API response as received; a search is not a guaranteed complete catalog export. Requests time out after 60 seconds. Rate limits are reported without automatic retries.
 
 ## Endpoint coverage
 
 | API | Command |
 | --- | --- |
-| `POST /oauth/token` | Automatic authentication; `mlc doctor` |
-| `POST /search/songcode` | `mlc search works TITLE --writer-last-name NAME` (also supports `--writer-first-name` and `--writer-ipi`) |
+| `POST /oauth/token` | Automatic authentication; `mlc auth setup`, `mlc doctor` |
+| `POST /search/songcode` | `mlc search works TITLE --writer-last-name NAME` (also `--writer-first-name` and `--writer-ipi`) |
 | `POST /search/recordings` | `mlc search recordings [--isrc ISRC] [--title TITLE] [--artist ARTIST]` |
 | `GET /work/id/{id}` | `mlc work get ID` |
 | `POST /works` | `mlc work batch ID...` |
@@ -73,16 +95,18 @@ The batch request intentionally uses `mlcsongCode`, matching the API specificati
 
 ## Security
 
-Credentials are stored in your local configuration; tokens are held in memory only. Requests use HTTPS to the fixed MLC API host and never follow redirects. HTTP error bodies are not printed. Known credential/token values are redacted if echoed in successful data responses. Do not put credentials, local config, or real API-response fixtures in Git. See [SECURITY.md](SECURITY.md).
+Credentials are stored in plain text in your local config with owner-only permissions; tokens are held in memory only. Requests use HTTPS to the fixed MLC API host and never follow redirects. HTTP error bodies are not printed. Tokens are redacted if they ever appear in a data response. Do not put credentials, local config, or real API-response fixtures in Git. See [SECURITY.md](SECURITY.md).
+
+`MLC_API_URL` overrides the API host. It exists for tests and proxies; leave it unset for normal use.
 
 ## Development
 
 ```sh
-make check
+make check      # fmt, clippy, tests
 make build
 make install
 ```
 
-Tests use synthetic credentials and local mock HTTP servers; no MLC account is required. Tagged versions publish macOS (Apple Silicon and Intel) and Linux (x86-64) archives with SHA-256 checksums through GitHub Actions. To update a source installation, repeat the installation command with `--force`.
+Tests use synthetic credentials and local mock HTTP servers; no MLC account is required. Pushing a `v*` tag publishes macOS (Apple Silicon and Intel) and Linux (x86-64 and arm64) archives with SHA-256 checksums through GitHub Actions.
 
-MIT licensed. Not affiliated with or endorsed by The MLC. The software license does not grant rights to MLC data; use of the API and data remains subject to [MLC terms](https://themlc.com/musical-works-database-terms-use).
+MIT licensed. See [CONTRIBUTING.md](CONTRIBUTING.md) to get involved.
