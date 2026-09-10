@@ -1,0 +1,10 @@
+/target/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*credentials*
+config.toml
+.DS_Store
+.ruff_cache/
