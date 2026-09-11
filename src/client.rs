@@ -12,6 +12,22 @@ use std::time::Duration;
 
 const BASE_URL: &str = "https://public-api.themlc.com/";
 
+/// Separate, unauthenticated transport: never attach MLC credentials to GitHub.
+pub fn release_download(url: &str) -> Result<Vec<u8>> {
+    HttpClient::builder()
+        .timeout(Duration::from_secs(120))
+        .connect_timeout(Duration::from_secs(15))
+        .user_agent(concat!("mlc-cli/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|_| Error::new(1, "Cannot initialize update client"))?
+        .get(url)
+        .send()
+        .and_then(Response::error_for_status)
+        .and_then(Response::bytes)
+        .map(|bytes| bytes.to_vec())
+        .map_err(|_| Error::new(1, "GitHub update request failed; try again later"))
+}
+
 pub struct Client {
     http: HttpClient,
     base: String,
@@ -178,6 +194,31 @@ mod tests {
             String::from_utf8(request).unwrap()
         });
         (address, handle)
+    }
+
+    #[test]
+    fn release_download_uses_no_authentication() {
+        let (address, handle) = server("200 OK", "archive");
+        assert_eq!(release_download(&address).unwrap(), b"archive");
+        let request = handle.join().unwrap().to_lowercase();
+        assert!(request.starts_with("get / "));
+        assert!(!request.contains("authorization:"));
+        assert!(request.contains("user-agent: mlc-cli/"));
+    }
+
+    #[test]
+    fn release_download_rejects_http_errors_without_echoing_body() {
+        for status in [
+            "404 Not Found",
+            "429 Too Many Requests",
+            "500 Internal Server Error",
+        ] {
+            let (address, handle) = server(status, "untrusted response");
+            let error = release_download(&address).unwrap_err();
+            assert_eq!(error.code, 1);
+            assert!(!error.message.contains("untrusted response"));
+            handle.join().unwrap();
+        }
     }
 
     #[test]

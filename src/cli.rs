@@ -33,6 +33,8 @@ pub enum Command {
     },
     /// Verify login and data access with a small read-only work search
     Doctor,
+    /// Update this executable from the latest GitHub release
+    Update,
     /// Generate shell completions
     Completions { shell: clap_complete::Shell },
 }

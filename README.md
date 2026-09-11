@@ -30,6 +30,16 @@ Alternatives: download an archive from [Releases](https://github.com/oneortwo/ml
 cargo install --git https://github.com/oneortwo/mlc-cli --locked
 ```
 
+## Update
+
+```sh
+mlc update
+```
+
+Downloads the latest GitHub release for macOS or Linux (Intel/AMD and arm64), verifies its SHA-256 checksum, and atomically replaces the running executable. No MLC credentials are needed. It never downgrades a newer installation. Existing shell completion files are refreshed and release notes go to stderr; piped output is JSON.
+
+The executable directory must be writable. For installations managed by Cargo, you can also rerun `cargo install --git https://github.com/oneortwo/mlc-cli --locked --force`.
+
 ## Quickstart
 
 ```sh

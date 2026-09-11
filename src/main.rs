@@ -3,6 +3,7 @@ mod client;
 mod config;
 mod error;
 mod output;
+mod update;
 
 use clap::{CommandFactory, Parser};
 use cli::{Auth, Cli, Command, Search, Work};
@@ -20,6 +21,7 @@ fn main() {
 
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
+        Command::Update => update::run(cli.json),
         Command::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "mlc", &mut std::io::stdout());
             Ok(())
