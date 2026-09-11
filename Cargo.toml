@@ -24,6 +24,10 @@ toml = "0.8"
 comfy-table = "7"
 dialoguer = { version = "0.11", default-features = false, features = ["password"] }
 tempfile = "3"
+sha2 = "0.10"
+semver = "1"
+flate2 = "1"
+tar = "0.4"
 
 [dev-dependencies]
 assert_cmd = "2"

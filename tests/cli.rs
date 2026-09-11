@@ -36,9 +36,11 @@ fn mock_api(body: &'static str) -> (String, thread::JoinHandle<String>) {
 #[test]
 fn help_and_completions_need_no_credentials() {
     mlc().arg("--help").assert().success();
+    mlc().args(["update", "--help"]).assert().success();
     let output = mlc().args(["completions", "zsh"]).output().unwrap();
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("#compdef mlc"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("update"));
 }
 
 #[test]

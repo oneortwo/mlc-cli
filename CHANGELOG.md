@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add `mlc update` to install the latest GitHub release without MLC credentials. Supports all four release platforms, requires a matching SHA-256 checksum, avoids downgrades, and replaces the executable atomically. Refreshes existing shell completions and displays release notes on stderr, preserving JSON output for pipes.
+
 ## 0.2.0
 
 - `mlc auth setup` prompts for the username and password, verifies them against the API, and only then saves them. `--no-input` reads `MLC_USERNAME` and `MLC_PASSWORD` for scripts and agents.
